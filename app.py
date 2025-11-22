@@ -1,16 +1,11 @@
 import streamlit as st
-import openai
+import google.generativeai as genai
 import gspread
 from google.oauth2.service_account import Credentials
-import json
 from datetime import datetime
 
 # --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(
-    page_title="BienDit - Assistant IA",
-    page_icon="🏠",
-    layout="centered"
-)
+st.set_page_config(page_title="BienDit - Assistant IA", page_icon="🏠", layout="centered")
 
 # --- STYLE CSS ---
 st.markdown("""
@@ -34,44 +29,33 @@ st.markdown("""
 # --- CONNEXION GOOGLE SHEETS ---
 @st.cache_resource
 def get_google_sheet():
-    # Vérifie si les secrets sont configurés
     if "gcp_service_account" not in st.secrets:
-        st.error("⚠️ Les secrets Google ne sont pas configurés sur Streamlit Cloud.")
+        st.error("⚠️ Secrets Google Sheets manquants.")
         return None
-
     try:
-        # Récupère les infos du compte de service
         secrets = st.secrets["gcp_service_account"]
-        
-        # Définit les droits d'accès
-        scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        
-        # Authentification
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(secrets, scopes=scope)
         client = gspread.authorize(creds)
-        
-        # Ouvre le fichier (Attention : le nom doit être EXACTEMENT celui de votre Sheet)
         return client.open("DB_BienDit_MVP").sheet1 
     except Exception as e:
-        st.error(f"Erreur de connexion Google Sheets : {e}")
+        st.error(f"Erreur Sheets : {e}")
         return None
 
 # --- LE PROMPT ---
-SYSTEM_PROMPT = """
+SYSTEM_INSTRUCTION = """
 Tu es "BienDit", un assistant expert en copywriting immobilier.
 RÈGLES :
 1. Titre en MAJUSCULES (Type + Atout + Ville).
-2. Style storytelling chaleureux.
+2. Style storytelling chaleureux et vendeur.
 3. Pas de clichés ("coup de coeur assuré" interdit).
-4. Structure aérée.
+4. Structure aérée avec des paragraphes clairs.
+5. Réponds uniquement avec l'annonce (pas de phrase d'intro).
 """
 
 # --- INTERFACE ---
 st.title("BienDit 🏠")
-st.markdown("L'assistant de rédaction pour les agents exigeants.")
+st.markdown("L'assistant de rédaction propulsé par Gemini.")
 
 with st.form("generation_form"):
     col1, col2 = st.columns(2)
@@ -87,35 +71,47 @@ with st.form("generation_form"):
 
     submitted = st.form_submit_button("Générer l'annonce ✨")
 
-# --- LOGIQUE ---
+# --- LOGIQUE GEMINI ---
 if submitted:
     if not type_bien or not ville or not points_forts:
         st.warning("Merci de remplir le Type, la Ville et les Points Forts.")
     else:
-        if "OPENAI_API_KEY" not in st.secrets:
-            st.error("⚠️ Clé API OpenAI manquante dans les secrets.")
+        # Vérification de la clé API
+        if "GOOGLE_API_KEY" not in st.secrets:
+            st.error("⚠️ Clé API Gemini manquante dans les secrets.")
         else:
-            with st.spinner("Rédaction en cours..."):
+            with st.spinner("Rédaction en cours avec Gemini..."):
                 try:
-                    client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-                    prompt = f"Type: {type_bien}, Ville: {ville}, Surface: {surface}, Prix: {prix}, Forts: {points_forts}, Faibles: {points_faibles}"
+                    # 1. Configuration de Gemini
+                    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+                    model = genai.GenerativeModel('gemini-1.5-flash') # Modèle rapide et gratuit
                     
-                    response = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": prompt}
-                        ]
-                    )
-                    annonce = response.choices[0].message.content
+                    # 2. Construction du prompt
+                    full_prompt = f"""
+                    {SYSTEM_INSTRUCTION}
+                    ---
+                    INFORMATIONS DU BIEN :
+                    Type: {type_bien}
+                    Ville: {ville}
+                    Surface: {surface} m²
+                    Prix: {prix}
+                    Points Forts: {points_forts}
+                    Points Faibles: {points_faibles}
+                    """
                     
+                    # 3. Génération
+                    response = model.generate_content(full_prompt)
+                    annonce = response.text
+                    
+                    # 4. Affichage
                     st.success("Annonce générée !")
                     st.text_area("Résultat", value=annonce, height=300)
                     
-                    # Sauvegarde
+                    # 5. Sauvegarde Sheets
                     sheet = get_google_sheet()
                     if sheet:
-                        sheet.append_row([str(datetime.now()), type_bien, ville, surface, points_forts, annonce])
+                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        sheet.append_row([timestamp, type_bien, ville, surface, points_forts, annonce])
                         st.toast("Sauvegardé ✅")
                         
                 except Exception as e:
