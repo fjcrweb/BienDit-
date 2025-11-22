@@ -84,7 +84,9 @@ if submitted:
                 try:
                     # 1. Configuration de Gemini
                     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-                    model = genai.GenerativeModel('gemini-1.5-flash') # Modèle rapide et gratuit
+                    
+                    # CHANGEMENT ICI : On utilise le modèle standard "gemini-pro"
+                    model = genai.GenerativeModel('gemini-pro') 
                     
                     # 2. Construction du prompt
                     full_prompt = f"""
